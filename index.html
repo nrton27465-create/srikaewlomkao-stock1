@@ -1,0 +1,276 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ศรีแก้ว-คลังมะขาม</title>
+
+<script src="https://unpkg.com/html5-qrcode"></script>
+
+<style>
+body{
+  font-family: "Prompt", sans-serif;
+  margin:0;
+  background:#f5f1eb;
+  font-size:20px;
+  color:#3e2723;
+}
+.container{max-width:1200px;margin:auto;padding:20px}
+h1{text-align:center;background:#6d4c41;color:#fff;padding:20px;border-radius:12px}
+.tabs{display:flex;gap:10px;margin:20px 0}
+.tab{flex:1;padding:15px;border-radius:10px;background:#fff;text-align:center;cursor:pointer;font-weight:600}
+.tab.active{background:#6d4c41;color:#fff}
+.card{background:#fff;padding:20px;border-radius:12px;margin:20px 0}
+select,button{
+  padding:12px;
+  font-size:18px;
+  border-radius:8px;
+  border:1px solid #ccc;
+}
+button{
+  background:#6d4c41;
+  color:#fff;
+  cursor:pointer;
+}
+button.secondary{
+  background:#fff;
+  color:#6d4c41;
+  border:1px solid #6d4c41;
+}
+table{
+  width:100%;
+  border-collapse:collapse;
+  margin-top:15px;
+}
+th,td{
+  padding:10px;
+  border-bottom:1px solid #ddd;
+}
+th{
+  background:#6d4c41;
+  color:#fff;
+}
+.qrbox{
+  margin-top:15px;
+}
+</style>
+</head>
+
+<body>
+<div class="container">
+
+<h1>ศรีแก้ว-คลังมะขาม</h1>
+
+<div class="tabs">
+  <div class="tab active" onclick="showPage('in')" id="tab-in">รับเข้า</div>
+  <div class="tab" onclick="showPage('out')" id="tab-out">เบิกออก</div>
+  <div class="tab" onclick="showPage('stock')" id="tab-stock">Stock</div>
+</div>
+
+<!-- INBOUND -->
+<div id="page-in" class="card">
+  <h2>รับเข้า</h2>
+
+  <label>ผู้บันทึก</label>
+  <select id="in-recorder"></select>
+
+  <label>ชั้นจัดเก็บ</label>
+  <select id="in-shelf"></select>
+
+  <br><br>
+  <button onclick="startScan('in')">สแกน QR</button>
+
+  <div id="qr-reader" class="qrbox"></div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>รายการ</th>
+        <th>ลบ</th>
+      </tr>
+    </thead>
+    <tbody id="in-list"></tbody>
+  </table>
+
+  <button onclick="saveInbound()">บันทึก</button>
+</div>
+
+<!-- OUTBOUND -->
+<div id="page-out" class="card" style="display:none">
+  <h2>เบิกออก</h2>
+
+  <label>ผู้บันทึก</label>
+  <select id="out-recorder"></select>
+
+  <br><br>
+  <button onclick="startScan('out')">สแกน QR</button>
+
+  <div id="qr-reader2" class="qrbox"></div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>รายการ</th>
+        <th>ลบ</th>
+      </tr>
+    </thead>
+    <tbody id="out-list"></tbody>
+  </table>
+
+  <button onclick="saveOutbound()">บันทึก</button>
+</div>
+
+<!-- STOCK -->
+<div id="page-stock" class="card" style="display:none">
+  <h2>Stock</h2>
+
+  <label>ชนิดมะขาม</label>
+  <select id="stock-type" onchange="loadStock()"></select>
+
+  <table>
+    <thead>
+      <tr>
+        <th>โกดัง</th>
+        <th>ตำแหน่ง</th>
+        <th>เหลือ</th>
+      </tr>
+    </thead>
+    <tbody id="stock-table"></tbody>
+  </table>
+</div>
+
+</div>
+
+<script>
+const API_URL = "https://script.google.com/macros/s/AKfycbzL4oTPJ_eYKwyDwWvYMC5ppuYoAGGZlQlpLl2owcVYZ_YIihOB_qwxJnwb0s11at3hCw/exec";
+
+let inItems = [];
+let outItems = [];
+let qrScanner;
+let qrScanner2;
+
+function showPage(p){
+  document.getElementById("page-in").style.display = p==="in"?"block":"none";
+  document.getElementById("page-out").style.display = p==="out"?"block":"none";
+  document.getElementById("page-stock").style.display = p==="stock"?"block":"none";
+
+  document.querySelectorAll(".tab").forEach(t=>t.classList.remove("active"));
+  document.getElementById("tab-"+p).classList.add("active");
+
+  if(p==="stock") loadStock();
+}
+
+async function loadDropdowns(){
+  const res = await fetch(API_URL+"?action=dropdowns");
+  const data = await res.json();
+
+  fillSelect("in-recorder",data.recorders,true);
+  fillSelect("out-recorder",data.recorders,true);
+  fillSelect("in-shelf",data.shelves,true);
+  fillSelect("stock-type",data.types,false);
+}
+
+function fillSelect(id,arr,addBlank){
+  let html="";
+  if(addBlank) html += `<option value="">--เลือก--</option>`;
+  arr.forEach(v=>html+=`<option value="${v}">${v}</option>`);
+  document.getElementById(id).innerHTML = html;
+}
+
+function startScan(mode){
+  if(mode==="in"){
+    qrScanner = new Html5Qrcode("qr-reader");
+    qrScanner.start({facingMode:"environment"},{fps:10,qrbox:250},
+      txt=>{
+        if(!inItems.includes(txt)){
+          inItems.push(txt);
+          renderList("in");
+        }
+      }
+    );
+  }else{
+    qrScanner2 = new Html5Qrcode("qr-reader2");
+    qrScanner2.start({facingMode:"environment"},{fps:10,qrbox:250},
+      txt=>{
+        if(!outItems.includes(txt)){
+          outItems.push(txt);
+          renderList("out");
+        }
+      }
+    );
+  }
+}
+
+function renderList(mode){
+  const arr = mode==="in"?inItems:outItems;
+  const tbody = document.getElementById(mode+"-list");
+  tbody.innerHTML = arr.map((v,i)=>`
+    <tr>
+      <td>${v}</td>
+      <td><button onclick="removeItem('${mode}',${i})">ลบ</button></td>
+    </tr>
+  `).join("");
+}
+
+function removeItem(mode,i){
+  if(mode==="in"){
+    inItems.splice(i,1);
+  }else{
+    outItems.splice(i,1);
+  }
+  renderList(mode);
+}
+
+async function saveInbound(){
+  const recorder = document.getElementById("in-recorder").value;
+  const shelf = document.getElementById("in-shelf").value;
+
+  await fetch(API_URL,{
+    method:"POST",
+    body:JSON.stringify({
+      action:"saveInbound",
+      payload:{recorder,shelf,items:inItems}
+    })
+  });
+
+  alert("บันทึกสำเร็จ");
+  inItems=[];
+  renderList("in");
+}
+
+async function saveOutbound(){
+  const recorder = document.getElementById("out-recorder").value;
+
+  await fetch(API_URL,{
+    method:"POST",
+    body:JSON.stringify({
+      action:"saveOutbound",
+      payload:{recorder,items:outItems}
+    })
+  });
+
+  alert("บันทึกสำเร็จ");
+  outItems=[];
+  renderList("out");
+}
+
+async function loadStock(){
+  const type = document.getElementById("stock-type").value;
+  const res = await fetch(API_URL+"?action=stock&type="+encodeURIComponent(type));
+  const rows = await res.json();
+
+  document.getElementById("stock-table").innerHTML =
+    rows.map(r=>`
+      <tr>
+        <td>${r.warehouse}</td>
+        <td>${r.position}</td>
+        <td>${r.remain}</td>
+      </tr>
+    `).join("");
+}
+
+window.onload = loadDropdowns;
+</script>
+
+</body>
+</html>
